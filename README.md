@@ -2,7 +2,7 @@
 
 <img width="1211" height="237" alt="image" src="https://github.com/user-attachments/assets/8e23b3ca-8d8f-4401-b564-e1b065521fd4" />
 
-_Most common form is stats, and displaying the loaded plugins & skills. Extra sections appear as needed_
+_Most common form is displaying these stats, which include the loaded plugins & skills. Extra sections appear as needed_
 
 To install (note: requires a ["Nerd font"](https://www.nerdfonts.com/font-downloads) for the icons):
 
