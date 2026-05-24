@@ -10,6 +10,8 @@ To install (note: requires a ["Nerd font"](https://www.nerdfonts.com/font-downlo
 make install
 ```
 
+This symlinks the files into your `~/.claude/` user dir, allowing you to easily update them via a `git pull`
+
 ## Demo
 
 A dummy session to demonstrate the layout:
