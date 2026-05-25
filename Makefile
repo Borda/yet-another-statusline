@@ -1,32 +1,16 @@
-STATUSLINE_SRC := $(CURDIR)/claude/statusline_command.py
-THEMES_SRC     := $(CURDIR)/claude/statusline/themes.py
-MON_SRC        := $(CURDIR)/claude/mon.py
-INSTALL_DIR	   := $(HOME)/.claude
-
-install:
-	@mkdir -p "$(INSTALL_DIR)/statusline"
-	@ln -sf $(STATUSLINE_SRC) "$(INSTALL_DIR)/statusline_command.py" || true
-	@ln -sf $(THEMES_SRC)     "$(INSTALL_DIR)/statusline/themes.py" || true
-	@echo "installed -> $(INSTALL_DIR)/statusline_command.py"
-	@echo "installed -> $(INSTALL_DIR)/statusline/themes.py"
-
 demo:
 	@python3 claude/statusline/demo.py
 
 demo/img:
 	@python3 claude/statusline/demo.py --snapshots demo/
 
-mon/install:
-	@for dir in $(INSTALL_DIRS); do \
-		if ! test -d "$$dir"; then \
-			echo "directory $$dir does not exist, skipping"; \
-			continue; \
-		fi; \
-		ln -sf $(MON_SRC) "$$dir/mon.py"; \
-		echo "installed mon -> $$dir"; \
-	done
+test:
+	@uv run pytest -q
+
+statusline/test:
+	@uv run python claude/statusline/demo.py
 
 mon/run:
 	uv run python claude/mon.py
 
-.PHONY: install demo demo/img mon/install mon/run
+.PHONY: demo demo/img test statusline/test mon/run

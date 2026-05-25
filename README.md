@@ -29,15 +29,16 @@ claude -p "/yas:init"
 
 `/yas:init` detects the new versioned path and rewrites it automatically.
 
-### Via git clone (dev / local)
+### Via git clone (contributors / live-edit)
+
+Edits to the checkout take effect immediately — no reinstall step.
 
 ```bash
 git clone https://github.com/tmck-code/yet-another-statusline
 cd yet-another-statusline
-make install
 ```
 
-Then add to `~/.claude/settings.json` manually:
+Wire `statusLine.command` in `~/.claude/settings.json` to point at the checkout:
 ```json
 "statusLine": {
   "async": true,
@@ -45,6 +46,10 @@ Then add to `~/.claude/settings.json` manually:
   "type": "command"
 }
 ```
+
+> **Note:** if you also have the plugin installed, `claude plugin install` will overwrite
+> `statusLine.command` back to the plugin cache path. Either uninstall the plugin or bump
+> the version in `.claude-plugin/plugin.json` before reinstalling to keep your local path.
 
 ## Demo
 
@@ -69,8 +74,10 @@ The statusline also renders differently according to available width
 
 ## Commands
 
-To demo/test:
-
 ```bash
-make demo
+make test            # run pytest suite
+make demo            # animated demo at current terminal width
+make statusline/test # same as demo — use during development
+make demo/img        # render snapshots into demo/
+make mon/run         # launch multi-session monitor TUI
 ```
