@@ -1309,6 +1309,16 @@ def pill_gradient_fg(col: int, pill_start: int, pill_end: int,
     return f'[38;2;{r};{g};{b}m'
 
 
+def pill_border_seq(col: int, pill_start: int, pill_end: int,
+                    anchor: tuple[int, int, int], shift: tuple[int, int, int],
+                    pct: int) -> str:
+    """FG + matching BG for pill half-block border chars (eliminates gap artefacts)."""
+    fg = pill_gradient_fg(col, pill_start, pill_end, anchor, shift, pct)
+    bg = fg.replace('[38;2;', '[48;2;', 1)
+    return fg + bg
+
+
+
 class GradientEngine:
     FADE        = 0.06
     SPARK_CHARS = '▁▂▃▄▅▆▇█'
@@ -1381,9 +1391,10 @@ class GradientEngine:
         denom = max(1, bar_w - 1)
         parts = []
         for i in range(filled):
-            parts.append(f'{self.gradient_color(i / denom)}{BarChars.FILLED}')
+            r, g, b = self.gradient_rgb(i / denom)
+            parts.append(f'\033[48;2;{r};{g};{b}m ')
         if filled <= bar_w:
-            parts.append(f'{self.gradient_color(filled / denom)}{BarChars.MID}')
+            parts.append(f'\033[49m{self.gradient_color(filled / denom)}{BarChars.MID}')
         return ''.join(parts)
 
     def _spark_flat(self, idx: int) -> tuple[str, str]:
