@@ -20,8 +20,8 @@ dev = [
 exclude = [
     ".claude/",
     ".venv/",
-    "claude/",
     "openspec/",
+    "test/",
 ]
 plugins = []
 disallow_untyped_defs = true  # no functions without type annotations
