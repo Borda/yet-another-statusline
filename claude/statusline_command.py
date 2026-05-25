@@ -40,11 +40,54 @@ class BarChars:
 HOME       = Path(os.path.expanduser('~'))
 CLAUDE_DIR = Path(os.environ.get('CLAUDE_CONFIG_DIR', str(HOME / '.claude')))
 MIN_WIDTH    = 40
-MAX_WIDTH    = 120
+MAX_WIDTH    = 140
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
 SOFT_LIMIT = 150_000
 _ANSI_RE   = re.compile(r'\x1b\[[0-9;]*m')
+
+FIVE_HOUR_MINUTES        = 300
+SEVEN_DAY_MINUTES        = 10080
+FIVE_HOUR_WARMUP_MINUTES = 5
+SEVEN_DAY_WARMUP_MINUTES = 30
+
+
+def burndown_delta(
+    used_pct: float,
+    resets_at: int,
+    window_minutes: int,
+    warmup_minutes: int,
+    now: float | None = None,
+) -> float | None:
+    if not resets_at:
+        return None
+    t = now if now is not None else time.time()
+    if t >= resets_at:
+        return None
+    window_start_ts = resets_at - window_minutes * 60
+    elapsed_minutes = (t - window_start_ts) / 60
+    if elapsed_minutes < warmup_minutes:
+        return None
+    ideal_pct = (elapsed_minutes / window_minutes) * 100
+    return used_pct - ideal_pct
+
+
+def subagent_avg_tpm(
+    total_input: int,
+    output: int,
+    first_timestamp: float,
+    now: float,
+    floor_seconds: float = 3.0,
+) -> int | None:
+    if first_timestamp == 0 or now - first_timestamp < floor_seconds:
+        return None
+    return round((total_input + output) / ((now - first_timestamp) / 60))
+
+
+def subagent_share(sub_inout: int, session_inout: int) -> float | None:
+    if session_inout <= 0:
+        return None
+    return sub_inout / session_inout
 
 
 def terminal_width() -> int:
@@ -117,7 +160,8 @@ ICON_COST     = '\uefc8'      # nf-md currency-usd  (cost row)
 ICON_TOK_RATE = '\U000f18a7'  # nf-md gauge         (t/m rate label)
 GLYPH_MODEL    = '\U000f08b9' # nf-md-monitor-dashboard
 GLYPH_THINKING = '\U000f1a53' # nf-md-brain
-GLYPH_FAST     = '\uef76'     # nf-cod-zap (shown when fast_mode is on)
+GLYPH_BURN_FAST = '\uef76'  # nf-cod-zap (shown when the burn rate is too fast)
+GLYPH_BURN_SLOW = '\uf490'  # nf-oct-flame (shown when the burn rate is _not_ too fast)
 GLYPH_FOLDER   = '\uef85'     # nf-custom folder    (path row)
 GLYPH_SUBAGENT = '\uf135'     # nf-fa-tasks         (subagent list)
 GLYPH_SUBAGENT_ROW = '\u25b6'  # \u25b6 U+25B6           (per-row Running Subagent marker)
@@ -130,6 +174,7 @@ GLYPH_RENAMED  = '\U000f1031' # nf-md-file_move     (git renamed count)
 GLYPH_CONTINUATION = '└'    # U+2514 BOX DRAWINGS LIGHT UP AND RIGHT (└)
 GLYPH_REPLYING     = '\U000f0189'  # nf-md-message  (replying state)
 GLYPH_HOURGLASS    = '\uf253'  # nf-fa-hourglass_half (subagent context size)
+GLYPH_PIE          = '\uf200'  # nf-fa-pie_chart     (subagent session share)
 
 TOOL_ARG_KEY: dict[str, str] = {
     'Bash':        'command',
@@ -1908,7 +1953,7 @@ class Renderer:
         c_helper  = rainbow_at(step, 9)
         model_clr = self.model_colour(model_name)
         pct       = self._model_bg_pct(effort_level)
-        glyph     = GLYPH_FAST if fast_mode else GLYPH_THINKING
+        glyph     = GLYPH_BURN_FAST if fast_mode else GLYPH_THINKING
 
         if pct:
             anchor, shift = self._model_anchor_pair(model_name)
@@ -1939,7 +1984,14 @@ class Renderer:
         seven_day = rate_limits.seven_day
         if seven_day.used_percentage != 0 or seven_day.resets_at != 0:
             seven_clr = self.fill_colour(float(seven_day.used_percentage or 0))
-            helper_text += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}'
+            seven_trend = self.burndown_trend(
+                float(seven_day.used_percentage or 0),
+                seven_day.resets_at,
+                SEVEN_DAY_MINUTES,
+                SEVEN_DAY_WARMUP_MINUTES,
+            )
+            seven_trend_part = f' {seven_trend}' if seven_trend else ''
+            helper_text += f' {self.LABEL}| {seven_clr}{seven_day.used_percentage}%{self.R}{seven_trend_part}'
 
         return helper_text, right_text, right_w
 
@@ -1955,11 +2007,18 @@ class Renderer:
                 resets_at = datetime.fromtimestamp(rate_limits.five_hour.resets_at).astimezone()
                 delta = resets_at - datetime.now().astimezone().replace(microsecond=0)
                 if delta.total_seconds() > 0:
+                    trend = self.burndown_trend(
+                        float(pct),
+                        rate_limits.five_hour.resets_at,
+                        FIVE_HOUR_MINUTES,
+                        FIVE_HOUR_WARMUP_MINUTES,
+                    )
+                    trend_part = f' {trend}' if trend else ''
                     total_s = int(delta.total_seconds())
                     h, rem  = divmod(total_s, 3600)
                     m       = rem // 60
                     time_str = f'{h}h{m}m' if h else f'{m}m'
-                    rate_text = f'{rate_text} {self.COMMIT}{time_str}{self.R}'
+                    rate_text = f'{rate_text}{trend_part} {self.COMMIT}{time_str}{self.R}'
         except Exception:
             pass
 
@@ -2020,7 +2079,7 @@ class Renderer:
             return f'{GLYPH_REPLYING} (replying)'
         return ''
 
-    def subagent_row(self, sub: RunningSubagent, width: int) -> str:
+    def subagent_row(self, sub: RunningSubagent, width: int, session_inout: int = 0) -> str:
         now     = time.time()
         dur     = max(0.0, now - sub.first_timestamp) if sub.first_timestamp > 0 else 0.0
         dur_s   = fmt_dur(dur).rjust(5)
@@ -2030,15 +2089,6 @@ class Renderer:
         short_model = model_key(sub.model)  # 'opus'/'sonnet'/'haiku'/'other'
         model_clr   = self.model_colour(sub.model)
         ctx_clr     = self.risk_zone_color(sub.total_input)
-        cost        = TokenAccounting.session_cost(
-            Model(id=sub.model),
-            TranscriptUsage(
-                input_tokens            = sub.billed_in,
-                cache_read_input_tokens = sub.cache_read_in,
-                output_tokens           = sub.output,
-            ),
-        )
-        cost_s = f'{cost:.2f}'
 
         step     = rainbow_step()
         c_marker = rainbow_at(step, 12)
@@ -2047,18 +2097,9 @@ class Renderer:
         target_w = width - 4  # content width (2 for '│ ' left, 2 for ' │' right)
 
         if width > 100:
-            # --- identity line (▶) ---
-            right1 = (
-                f'{model_clr}{short_model}{self.R}'
-                f' {self.LABEL}·{self.R}'
-                f' {self.LABEL}{BOLD}↑{self.R}{self.CTX}{out_s}{self.R}'
-                f' {self.LABEL}·{self.R}'
-                f' {self.CTX}{dur_s}{self.R}'
-            )
-            right1_w = _visible_width(right1)
-
+            # --- identity line (▶) : agent type · description (full width) ---
             head1_w  = 3 + _visible_width(type_text) + 3  # '▶  ' + type + ' · '
-            desc_budget = max(0, target_w - head1_w - 1 - right1_w)
+            desc_budget = max(0, target_w - head1_w)
             desc_text   = sub.description or ''
             if _visible_width(desc_text) > desc_budget:
                 desc_text = (desc_text[:desc_budget - 1] + '…') if desc_budget > 0 else ''
@@ -2070,27 +2111,64 @@ class Renderer:
                 f'{self.CTX}{desc_text}{self.R}'
             )
             left1_w = head1_w + _visible_width(desc_text)
-            pad1    = max(1, target_w - left1_w - right1_w)
-            line1   = f'{left1}{" " * pad1}{right1}'
+            pad1    = max(1, target_w - left1_w)
+            line1   = f'{left1}{" " * pad1}'  # right side empty; pad keeps equal widths
 
-            # --- continuation line (└) ---
-            right2 = (
-                f'{ctx_clr}{GLYPH_HOURGLASS} {tok_s}{self.R}'
-                f' {self.LABEL}·{self.R}'
-                f' {self.COST}${cost_s}{self.R}'
-            )
-            right2_w = _visible_width(right2)
+            # --- continuation line (└) : burn-metric cluster ---
+            # Stats live here as ' · '-joined fields; duration and model relocate
+            # from the identity line. When width is tight, stats are shed in
+            # priority order — share % first, then ↑output, then the t/m rate.
+            # The token count, elapsed, and model always remain.
+            tpm   = subagent_avg_tpm(sub.total_input, sub.output, sub.first_timestamp, now)
+            share = subagent_share(sub.total_input + sub.output, session_inout)
 
-            activity   = self.subagent_activity(sub.last_activity)
-            activity_w = _visible_width(activity)
-            left2_w    = 6 + activity_w
+            sep       = f' {self.LABEL}·{self.R} '
+            tok_field = fmt_tok(sub.total_input).rjust(5)
+            out_plain = f'↑ {out_s}'
+            out_pad   = ' ' * max(0, 6 - len(out_plain))
 
+            tpm_str = f'{tpm:,d}'.rjust(5) if tpm is not None else ''
+            if share is not None:
+                share_clr = self.gradient.gradient_color(share)
+                share_str = f'{share * 100:.1f}%'.rjust(6)
+
+            activity = self.subagent_activity(sub.last_activity)
+            left2_w  = 6 + _visible_width(activity)
             left2 = (
                 f'   {self.CTX_DIM}{GLYPH_CONTINUATION}{self.R}  '
                 f'{self.CTX_DIM}{activity}{self.R}'
             )
-            pad2  = max(1, target_w - left2_w - right2_w)
-            line2 = f'{left2}{" " * pad2}{right2}'
+
+            def cluster(show_tpm: bool, show_share: bool, show_out: bool) -> str:
+                frags: list[str] = []
+                if show_tpm:
+                    frags.append(f'{self.TOK}{tpm_str}{self.R}{self.LABEL} t/m{self.R}')
+                if show_share:
+                    frags.append(f'{share_clr}{GLYPH_PIE} {share_str}{self.R}')
+                # tok and ↑out are one space-grouped field (no · between them).
+                tok_seg = f'{ctx_clr}{tok_field}{self.R}'
+                if show_out:
+                    tok_seg += f' {out_pad}{self.LABEL}{BOLD}↑ {self.R}{self.CTX}{out_s}{self.R}'
+                frags.append(tok_seg)
+                frags.append(f'{self.CTX}{dur_s}{self.R}')
+                frags.append(f'{model_clr}{short_model.rjust(6)}{self.R}')
+                return sep.join(frags)
+
+            show_tpm, show_share, show_out = tpm is not None, share is not None, True
+
+            def fits() -> bool:
+                return left2_w + _visible_width(cluster(show_tpm, show_share, show_out)) + 1 <= target_w
+
+            if not fits() and show_share:
+                show_share = False
+            if not fits() and show_out:
+                show_out = False
+            if not fits() and show_tpm:
+                show_tpm = False
+
+            right2 = cluster(show_tpm, show_share, show_out)
+            pad2   = max(1, target_w - left2_w - _visible_width(right2))
+            line2  = f'{left2}{" " * pad2}{right2}'
 
             return f'{line1}\n{line2}'
 
@@ -2104,7 +2182,6 @@ class Renderer:
 
             right_n = (
                 f'{ctx_clr}{GLYPH_HOURGLASS} {tok_s}{self.R}'
-                f'  {self.COST}${cost_s}{self.R}'
                 f'  {self.LABEL}{BOLD}↑{self.R}{self.CTX}{out_s}{self.R}'
                 f'  {self.CTX}{dur_s}{self.R}'
             )
@@ -2397,6 +2474,19 @@ class Renderer:
             f' {self.LABEL}{done}/{total}{self.R} {BOLD}{pct:>3d}%{RESET}'
         )
 
+    def burndown_trend(self, used_pct: float, resets_at: int, window_minutes: int, warmup_minutes: int, now: float | None = None) -> str:
+        delta = burndown_delta(used_pct, resets_at, window_minutes, warmup_minutes, now=now)
+        if delta is None:
+            return ''
+        abs_delta = abs(delta)
+        # Map delta onto the fill gradient: t=0 (green) at max under-burn,
+        # t=0.5 (yellow-orange midpoint) at neutral, t=1 (red/purple) at max over-burn.
+        t = max(0.0, min(1.0, 0.5 + delta / 50.0))
+        colour = self.gradient.gradient_color(t)
+        glyph = GLYPH_BURN_FAST if delta > 0 else GLYPH_BURN_SLOW # colour modulation carries over/under-burn direction
+        sign  = '-' if delta < 0 else '+'
+        return f'{colour}{glyph} {sign}{abs_delta:05.2f}%{self.R}'
+
     def helper(self, five_hour: RateBucket) -> str:
         pct_clr = self.fill_colour(float(five_hour.used_percentage or 0))
         try:
@@ -2410,7 +2500,14 @@ class Renderer:
                 if not five_hour.used_percentage:
                     return '∞'
                 return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}∞'
-            return f'{pct_clr}{five_hour.used_percentage}%{self.R} {self.COMMIT}T-{delta}'
+            trend = self.burndown_trend(
+                float(five_hour.used_percentage or 0),
+                five_hour.resets_at,
+                FIVE_HOUR_MINUTES,
+                FIVE_HOUR_WARMUP_MINUTES,
+            )
+            trend_part = f' {trend}' if trend else ''
+            return f'{pct_clr}{five_hour.used_percentage}%{self.R}{trend_part} {self.COMMIT}T-{delta}'
         except Exception as e:
             return f'{e.__class__.__name__}, {str(e)}'
 
@@ -2474,7 +2571,7 @@ def build_narrow(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         ]
     if subagents.subagents:
         for sub in subagents.subagents:
-            for line in r.subagent_row(sub, width).split('\n'):
+            for line in r.subagent_row(sub, width, session_inout=0).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
@@ -2533,7 +2630,7 @@ def build_medium(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
         rows.append(RowSpec('separator_dim'))
     if subagents.subagents:
         for sub in subagents.subagents:
-            for line in r.subagent_row(sub, width).split('\n'):
+            for line in r.subagent_row(sub, width, session_inout=0).split('\n'):
                 rows.append(RowSpec('content', content=line))
         rows.append(RowSpec('separator_dim'))
     rows.append(RowSpec('content', content=line_context))
@@ -2562,6 +2659,10 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     sess_cost     = compute_session_cost(session.model, usage)
     day_cost      = compute_day_cost(session.model, token_log)
     subagents     = RunningSubagents.from_session(session.session_id, session.workspace.project_dir)
+    session_inout = (
+        (usage.billed_in + usage.cache_read) + usage.out
+        + sum(s.total_input + s.output for s in subagents.subagents)
+    )
     tasks         = TaskList.from_session(session.transcript_path)
     elapsed       = elapsed_from_transcript(session.transcript_path)
 
@@ -2649,7 +2750,7 @@ def build_wide(session: SessionInfo, width: int, r: Renderer) -> LayoutSpec:
     if subagents.subagents:
         rows.append(RowSpec(sep_kind('separator_dim'), ups=pending_ups))
         for sub in subagents.subagents:
-            for line in r.subagent_row(sub, width).split('\n'):
+            for line in r.subagent_row(sub, width, session_inout=session_inout).split('\n'):
                 rows.append(RowSpec('content', content=line))
         pending_ups = ()
 

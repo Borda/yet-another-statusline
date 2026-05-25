@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from pathlib import Path
 
@@ -239,3 +240,148 @@ def test_subagent_activity_replying() -> None:
 
 def test_subagent_activity_empty() -> None:
     assert _r.subagent_activity(('', '', {})) == ''
+
+
+# E. Burn-metric cluster (tasks 5.1–5.3)
+
+def _make_established_sub(**kwargs) -> sl.RunningSubagent:
+    """Subagent running for 60s with enough tokens to produce valid tpm."""
+    defaults = dict(
+        first_timestamp=time.time() - 60,
+        total_input=3000,
+        billed_in=3000,
+        output=600,
+    )
+    defaults.update(kwargs)
+    return _make_sub(**defaults)
+
+
+def test_burn_cluster_wide_shows_tpm_and_share() -> None:
+    # 5.1: ample wide width — both t/m and % must appear
+    sub = _make_established_sub()
+    session_inout = sub.total_input + sub.output + 1000  # non-zero denominator
+    out = _r.subagent_row(sub, 200, session_inout=session_inout)
+    _, line2 = out.split('\n')
+    plain = strip_ansi(line2)
+    assert 't/m' in plain
+    assert '%' in plain
+
+
+def _pressure_sub() -> sl.RunningSubagent:
+    """Wide stat fields + a max-length (36-char) activity, so the narrowest
+    wide widths are forced to shed stats. tpm/share both have valid data."""
+    return _make_sub(
+        billed_in=900_000_000, output=500_000_000, total_input=900_000_000,
+        first_timestamp=time.time() - 60, model='claude-sonnet-4-6',
+        last_activity=('tool_use', 'Bash', {'command': 'x' * 60}),
+    )
+
+
+def _droppables(line2: str) -> tuple[bool, bool, bool]:
+    """(t/m, share%, ↑output) presence in a continuation line."""
+    p = strip_ansi(line2)
+    return ('t/m' in p, '%' in p, '↑' in p)
+
+
+def test_burn_cluster_drop_priority_respected() -> None:
+    # Stats shed in order share% → ↑output → t/m. So across every width the
+    # kept set is a prefix of [t/m, ↑output, share%] from the high-priority end;
+    # a lower-priority stat is never present without all higher-priority ones.
+    valid = {(True, True, True), (True, False, True), (True, False, False), (False, False, False)}
+    sub = _pressure_sub()
+    si  = 10 ** 12
+    for w in range(101, 201):
+        _, line2 = _r.subagent_row(sub, w, session_inout=si).split('\n')
+        combo = _droppables(line2)
+        assert combo in valid, f'width={w}: out-of-priority cluster {combo}'
+
+
+def test_burn_cluster_all_drop_levels_reachable() -> None:
+    # The chain isn't vacuous: each successive drop level is actually hit.
+    sub = _pressure_sub()
+    si  = 10 ** 12
+    seen = {_droppables(_r.subagent_row(sub, w, session_inout=si).split('\n')[1])
+            for w in range(101, 201)}
+    assert (True, False, False) in seen   # share + output dropped, t/m kept
+    assert (True, False, True)  in seen    # share dropped, output kept
+    assert (True, True, True)   in seen    # nothing dropped
+
+
+def test_burn_cluster_tok_dur_model_never_drop() -> None:
+    # Token count, elapsed, and model survive at every width, even under pressure.
+    sub = _pressure_sub()
+    si  = 10 ** 12
+    for w in range(101, 201):
+        _, line2 = _r.subagent_row(sub, w, session_inout=si).split('\n')
+        plain = strip_ansi(line2)
+        assert re.search(r'\d+m\d{2}s', plain), f'width={w} dropped elapsed'
+        assert 'sonnet' in plain, f'width={w} dropped model'
+        assert sl.fmt_tok(sub.total_input) in plain, f'width={w} dropped token count'
+
+
+def test_burn_cluster_widening_only_adds_stats() -> None:
+    # Monotonic: a wider row never shows fewer droppable stats than a narrower one.
+    sub = _pressure_sub()
+    si  = 10 ** 12
+    prev_count = -1
+    for w in range(101, 201):
+        _, line2 = _r.subagent_row(sub, w, session_inout=si).split('\n')
+        count = sum(_droppables(line2))
+        assert count >= prev_count, f'width={w}: stat count dropped on widening'
+        prev_count = count
+
+
+def test_burn_cluster_narrow_row_unchanged() -> None:
+    # 5.3: width ≤ 100 — neither figure, single line, row unchanged
+    sub = _make_established_sub()
+    session_inout = sub.total_input + sub.output + 5000
+    for w in [80, 100]:
+        out = _r.subagent_row(sub, w, session_inout=session_inout)
+        assert '\n' not in out, f'width={w} produced two lines'
+        plain = strip_ansi(out)
+        assert 't/m' not in plain, f'width={w} showed t/m in narrow row'
+        assert '%' not in plain, f'width={w} showed % in narrow row'
+
+
+# F. Single stat line + cost removal (burndown mockup match)
+
+def test_subagent_row_wide_no_cost() -> None:
+    sub = _make_established_sub()
+    out = _r.subagent_row(sub, 160, session_inout=sub.total_input + sub.output + 5000)
+    assert '$' not in strip_ansi(out)
+
+
+def test_subagent_row_narrow_no_cost() -> None:
+    assert '$' not in strip_ansi(_r.subagent_row(_make_sub(), 100))
+
+
+def test_subagent_row_wide_dur_and_model_on_continuation() -> None:
+    # duration + model relocate from the identity line to the stat cluster
+    sub = _make_established_sub(model='claude-sonnet-4-6', first_timestamp=time.time() - 90)
+    line1, line2 = _r.subagent_row(
+        sub, 160, session_inout=sub.total_input + sub.output + 5000).split('\n')
+    p1, p2 = strip_ansi(line1), strip_ansi(line2)
+    assert 'sonnet' in p2 and 'sonnet' not in p1
+    assert '1m30s' in p2 and '1m30s' not in p1
+
+
+def test_subagent_row_wide_identity_is_just_type_and_desc() -> None:
+    line1, _ = _r.subagent_row(_make_sub(description='hello world'), 160).split('\n')
+    assert strip_ansi(line1).rstrip() == '▶  general-purpose · hello world'
+
+
+def test_subagent_row_wide_share_one_decimal() -> None:
+    sub = _make_established_sub()
+    _, line2 = _r.subagent_row(
+        sub, 200, session_inout=sub.total_input + sub.output + 5000).split('\n')
+    m = re.search(r'(\d+\.\d+)%', strip_ansi(line2))
+    assert m is not None
+    assert len(m.group(1).split('.')[1]) == 1  # exactly one decimal place
+
+
+def test_subagent_row_wide_model_right_justified() -> None:
+    # 5-char model name (haiku) gains a leading space from rjust(6)
+    sub = _make_established_sub(model='claude-haiku-4-5', first_timestamp=time.time() - 90)
+    _, line2 = _r.subagent_row(
+        sub, 200, session_inout=sub.total_input + sub.output + 5000).split('\n')
+    assert strip_ansi(line2).rstrip().endswith(' haiku')
