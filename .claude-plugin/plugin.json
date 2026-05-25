@@ -1,7 +1,7 @@
 {
   "author": {
-    "name": "Borda",
-    "url": "https://github.com/Borda"
+    "name": "tmck-code",
+    "url": "https://github.com/tmck-code"
   },
   "description": "Yet Another Statusline — Claude Code statusline showing tokens, context, model, subagents, burn rate, and plugins at a glance",
   "keywords": [
@@ -13,6 +13,6 @@
   ],
   "license": "MIT",
   "name": "yas",
-  "repository": "https://github.com/Borda/yet-another-statusline",
+  "repository": "https://github.com/tmck-code/yet-another-statusline",
   "version": "0.1.0"
 }

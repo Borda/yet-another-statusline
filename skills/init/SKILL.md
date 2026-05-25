@@ -10,7 +10,7 @@ model: haiku
 
 Write `statusLine.command` into `~/.claude/settings.json` pointing at this plugin's Python renderer.
 
-Run once after `claude plugin install Borda/yet-another-statusline`.
+Run once after `claude plugin install yas@yet-another-statusline`.
 Re-run after every upgrade — detects stale versioned path and rewrites.
 
 </objective>
@@ -43,7 +43,7 @@ if [ -z "$PLUGIN_ROOT" ]; then
 fi
 
 if [ -z "$PLUGIN_ROOT" ]; then
-    printf "! yas plugin not found — install first: claude plugin install Borda/yet-another-statusline\n"
+    printf "! yas plugin not found — install first:\n    claude plugin marketplace add tmck-code/yet-another-statusline\n    claude plugin install yas@yet-another-statusline\n"
     exit 1
 fi
 

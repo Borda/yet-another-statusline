@@ -4,22 +4,47 @@
 
 _Most common form is displaying these stats, which include the loaded plugins & skills. Extra sections appear as needed_
 
-To install (note: requires a ["Nerd font"](https://www.nerdfonts.com/font-downloads) for the icons):
+## Requirements
 
-**Via Claude Code plugin (recommended):**
+- Python 3.10+
+- [Nerd Font](https://www.nerdfonts.com/font-downloads) (for icons)
+
+## Install
+
+### Via Claude Code plugin (recommended)
+
 ```bash
-claude plugin install Borda/yet-another-statusline
-/yas:init
+claude plugin marketplace add tmck-code/yet-another-statusline
+claude plugin install yas@yet-another-statusline
+claude -p "/yas:init"
 ```
 
-**Via git clone:**
+`/yas:init` wires `statusLine.command` into `~/.claude/settings.json`. Reload Claude Code after it completes.
+
+**Upgrade:**
 ```bash
-git clone https://github.com/Borda/yet-another-statusline
+claude plugin install yas@yet-another-statusline
+claude -p "/yas:init"
+```
+
+`/yas:init` detects the new versioned path and rewrites it automatically.
+
+### Via git clone (dev / local)
+
+```bash
+git clone https://github.com/tmck-code/yet-another-statusline
 cd yet-another-statusline
 make install
 ```
 
-The plugin method fetches and caches the repo automatically. `/yas:init` wires the `statusLine.command` into `~/.claude/settings.json` — re-run after each upgrade to update the versioned path.
+Then add to `~/.claude/settings.json` manually:
+```json
+"statusLine": {
+  "async": true,
+  "command": "python3 \"/path/to/yet-another-statusline/claude/statusline_command.py\"",
+  "type": "command"
+}
+```
 
 ## Demo
 
