@@ -6,11 +6,15 @@ _Most common form is displaying these stats, which include the loaded plugins & 
 
 To install (note: currently requires a ["Nerd font"](https://www.nerdfonts.com/font-downloads) for the icons):
 
-```bash
+```shell
+# to install to ~/.claude/
 make install
+
+# to install to another dir
+CLAUDE_CONFIG_DIR=~/.claude_blah/ make install
 ```
 
-This symlinks the files into your `~/.claude/` user dir, allowing you to easily update them via a `git pull`
+This symlinks the files into your claude user dir, allowing you to easily update them via a `git pull`
 
 ## Demo
 
@@ -82,7 +86,11 @@ Width is detected by the first source that returns a positive value:
 To demo/test:
 
 ```bash
+# animated demo
 make demo
+
+# screenshot demo - writes to demo/
+make demo/img
 ```
 
 ## Contributing

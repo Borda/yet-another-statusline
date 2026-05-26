@@ -47,7 +47,8 @@ class BarChars:
 HOME       = Path(os.path.expanduser('~'))
 CLAUDE_DIR = Path(os.environ.get('CLAUDE_CONFIG_DIR', str(HOME / '.claude')))
 MIN_WIDTH    = 40
-MAX_WIDTH    = 140
+DEFAULT_MAX_WIDTH = 140
+MAX_WIDTH    = int(os.environ.get('YAS_MAX_WIDTH') or DEFAULT_MAX_WIDTH)
 NARROW_WIDTH = 55
 MEDIUM_WIDTH = 80
 SOFT_LIMIT = 150_000
@@ -99,10 +100,12 @@ def subagent_share(sub_inout: int, session_inout: int) -> float | None:
 
 def terminal_width() -> int:
     try:
-        w = int(subprocess.run(["tmux", "display-message", "-p", "'#{pane_width}'"], capture_output=True, text=True).stdout.strip().replace("'", ""))
+        w = int(subprocess.run([
+            "tmux", "display-message", "-p", "-t", f"{os.environ['TMUX_PANE']}", "'#{pane_width}'"
+        ], capture_output=True, text=True).stdout.strip().replace("'", ""))
         if w > 0:
             return w
-    except (OSError, ValueError):
+    except (OSError, ValueError, KeyError):
         pass
     try:
         w = int((CLAUDE_DIR / 'terminal-width').read_text().strip())
@@ -2908,7 +2911,10 @@ def main() -> None:
     raw_tw = terminal_width()
     if raw_tw < MIN_WIDTH:
         return
-    width = max(MIN_WIDTH, min(MAX_WIDTH, raw_tw - 6))
+    if os.environ.get('YAS_FULL_WIDTH'):
+        width = max(MIN_WIDTH, raw_tw-6)
+    else:
+        width = max(MIN_WIDTH, min(MAX_WIDTH, raw_tw - 6))
 
     sys.stdout.write(render(info, width, bg_shift=bg_shift, theme=theme))
 
