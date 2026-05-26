@@ -1,7 +1,14 @@
 [
   "Bash(cp:*)",
+  "Bash(cut:*)",
   "Bash(date:*)",
+  "Bash(dirname:*)",
+  "Bash(find:*)",
+  "Bash(grep:*)",
+  "Bash(head:*)",
   "Bash(jq:*)",
   "Bash(printf:*)",
-  "Bash(which:*)"
+  "Bash(sort:*)",
+  "Bash(which:*)",
+  "Bash(xargs:*)"
 ]
