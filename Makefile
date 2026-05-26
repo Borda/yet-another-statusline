@@ -2,10 +2,10 @@ MON_SRC           := $(CURDIR)/claude/mon.py
 CLAUDE_CONFIG_DIR ?= $(HOME)/.claude
 
 demo:
-	@python3 claude/statusline/demo.py
+	@uv run python3 claude/statusline/demo.py
 
 demo/img:
-	@python3 claude/statusline/demo.py --snapshots demo/
+	@uv run python3 claude/statusline/demo.py --snapshots demo/
 
 test:
 	@uv run pytest -q

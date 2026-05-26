@@ -87,18 +87,27 @@ printf "  Python: %s\n" "$PYTHON_BIN"
 ## Step 4: Back up and write statusLine.command
 
 ```bash
-BAK_TS=$(date -u +%Y%m%dT%H%M%SZ)
-cp ~/.claude/settings.json "$HOME/.claude/settings.json.bak-yas-${BAK_TS}"  # timeout: 5000
-printf "  Backed up → settings.json.bak-yas-%s\n" "$BAK_TS"
+# Create settings.json with empty object if missing (no backup needed for a new file)
+if [ ! -f "$HOME/.claude/settings.json" ]; then
+    printf '{}\n' > "$HOME/.claude/settings.json"
+    printf "  Created ~/.claude/settings.json\n"
+else
+    BAK_TS=$(date -u +%Y%m%dT%H%M%SZ)
+    cp ~/.claude/settings.json "$HOME/.claude/settings.json.bak-yas-${BAK_TS}"  # timeout: 5000
+    printf "  Backed up → settings.json.bak-yas-%s\n" "$BAK_TS"
+fi
 
 _result=$(jq --arg cmd "\"$PYTHON_BIN\" \"$SCRIPT\"" \
     '.statusLine = {"async":true,"command":$cmd,"type":"command"}' \
     ~/.claude/settings.json)  # timeout: 5000
-[ $? -eq 0 ] && [ -n "$_result" ] && printf '%s\n' "$_result" > /tmp/yas_init_tmp.json \
-    || { printf "! jq failed — settings.json unchanged\n"; exit 1; }
-```
+[ $? -eq 0 ] && [ -n "$_result" ] || { printf "! jq failed — settings.json unchanged\n"; exit 1; }
 
-Write `/tmp/yas_init_tmp.json` back to `~/.claude/settings.json` using the Write tool.
+_tmp=$(mktemp "$HOME/.claude/settings.json.XXXXXXXXXX")
+printf '%s\n' "$_result" > "$_tmp" \
+    || { rm -f "$_tmp"; printf "! write failed — settings.json unchanged\n"; exit 1; }
+mv "$_tmp" "$HOME/.claude/settings.json"  # timeout: 3000
+printf "  settings.json updated\n"
+```
 
 ## Step 5: Validate and report
 
