@@ -98,7 +98,7 @@ def terminal_width() -> int:
         ], capture_output=True, text=True).stdout.strip().replace("'", ""))
         if w > 0:
             return w
-    except (OSError, ValueError):
+    except (OSError, ValueError, KeyError):
         pass
     try:
         w = int((CLAUDE_DIR / 'terminal-width').read_text().strip())
