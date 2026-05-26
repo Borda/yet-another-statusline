@@ -29,6 +29,18 @@ claude -p "/yas:init"
 
 `/yas:init` detects the new versioned path and rewrites it automatically.
 
+**Uninstall:**
+```bash
+claude -p "/yas:uninstall"
+claude plugin uninstall yas@yet-another-statusline
+```
+
+`claude plugin uninstall` only deletes the plugin cache — it leaves `statusLine.command`
+in `~/.claude/settings.json` pointing at the now-missing script, so the statusline keeps
+trying to run. Run `/yas:uninstall` **first** to remove that config (it backs up
+settings.json, and skips a custom non-yas statusLine) and clear the renderer's runtime
+logs. Reload Claude Code afterwards.
+
 ### Via git clone (contributors / live-edit)
 
 Edits to the checkout take effect immediately — no reinstall step.
